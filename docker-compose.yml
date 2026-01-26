@@ -1,0 +1,118 @@
+version: '3.8'
+
+services:
+  afas-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: afas-api
+    ports:
+      - "44638:44638"
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://afas:afas_secret@db:5432/afas
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app:ro
+    networks:
+      - afas-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:44638/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  afas-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: afas-worker
+    command: celery -A app.workers.celery_app worker --loglevel=info
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://afas:afas_secret@db:5432/afas
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app:ro
+    networks:
+      - afas-network
+    restart: unless-stopped
+
+  afas-ledger:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: afas-ledger
+    command: python -m app.services.blockchain_server
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://afas:afas_secret@db:5432/afas
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - afas-network
+    restart: unless-stopped
+
+  db:
+    image: postgres:15-alpine
+    container_name: afas-db
+    environment:
+      POSTGRES_USER: afas
+      POSTGRES_PASSWORD: afas_secret
+      POSTGRES_DB: afas
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - afas-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U afas -d afas"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: afas-redis
+    volumes:
+      - redis_data:/data
+    networks:
+      - afas-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+networks:
+  afas-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
