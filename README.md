@@ -138,9 +138,8 @@ AFAS-X is a comprehensive voice authentication system that embeds imperceptible 
 
 - Docker & Docker Compose
 - Git
-- (Optional) Node.js 20+ for frontend development
 
-### Installation
+### Deploy to Production
 
 1. **Clone the repository**
    ```bash
@@ -151,29 +150,32 @@ AFAS-X is a comprehensive voice authentication system that embeds imperceptible 
 2. **Configure environment**
    ```bash
    cp .env.example .env
-   # Edit .env with your settings (see Configuration section)
+   # Edit .env with your production settings
    ```
 
-3. **Start services**
+3. **Deploy**
    ```bash
-   docker compose up --build
+   docker compose up -d --build
    ```
 
-4. **Run database migrations**
-   ```bash
-   docker compose exec afas-api alembic upgrade head
-   ```
+   That's it. Database migrations run automatically on startup.
 
-5. **Access the application**
-   - **API**: http://localhost:44638
-   - **Swagger Docs**: http://localhost:44638/docs
-   - **Frontend**: http://localhost:52847 (if running separately)
+4. **Access the application**
+   - **API**: https://afasx.my-ai.tech (or your domain)
+   - **Swagger Docs**: https://afasx.my-ai.tech/docs
+
+### Updating
+
+```bash
+git pull
+docker compose up -d --build
+```
 
 ### Stopping
 
 ```bash
 docker compose down
-# To also remove volumes:
+# To reset everything (WARNING: destroys data):
 docker compose down -v
 ```
 
@@ -301,61 +303,7 @@ curl -X POST http://localhost:44638/verify \
 
 ---
 
-## Development
-
-### Local Setup
-
-```bash
-# Clone repository
-git clone https://gitea.my-house.dev/joe/Adaptive-Audio-Fingerprinting---Authenticity-System--AFAS-X-.git
-cd Adaptive-Audio-Fingerprinting---Authenticity-System--AFAS-X-
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # or `venv\Scripts\activate` on Windows
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Start PostgreSQL and Redis (via Docker)
-docker compose up db redis -d
-
-# Run migrations
-alembic upgrade head
-
-# Start API server
-uvicorn app.main:app --host 0.0.0.0 --port 44638 --reload
-```
-
-### Frontend Development
-
-```bash
-cd frontend
-
-# Install dependencies
-npm install
-
-# Create local env
-echo "NEXT_PUBLIC_API_URL=http://localhost:44638" > .env.local
-
-# Start development server
-npm run dev
-```
-
-### Running Tests
-
-```bash
-# All tests
-pytest
-
-# With coverage
-pytest --cov=app --cov-report=html
-
-# Specific test file
-pytest tests/test_fingerprint_layers.py -v
-```
-
-### Project Structure
+## Project Structure
 
 ```
 AFAS-X/
@@ -373,13 +321,9 @@ AFAS-X/
 │   │   └── fingerprinting/   # 6-layer pipeline
 │   ├── workers/              # Celery tasks
 │   └── main.py               # FastAPI app
-├── alembic/                  # Database migrations
-├── frontend/
-│   ├── app/                  # Next.js App Router
-│   ├── components/           # React components
-│   └── lib/                  # Utilities & auth context
-├── tests/                    # pytest tests
-├── docker-compose.yml
+├── alembic/                  # Database migrations (run automatically)
+├── frontend/                 # Next.js 14 App Router
+├── docker-compose.yml        # Production deployment
 ├── Dockerfile
 └── requirements.txt
 ```

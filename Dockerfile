@@ -7,16 +7,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies
+# Install system dependencies including curl for healthchecks
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
     libportaudio2 \
     build-essential \
+    curl \
     && rm -rf /var/lib/apt/lists/*
-
-# Create app user
-RUN useradd --create-home --shell /bin/bash appuser
 
 # Set working directory
 WORKDIR /app
@@ -29,13 +27,15 @@ RUN pip install --upgrade pip && \
     pip install -r requirements.txt
 
 # Copy application code
-COPY --chown=appuser:appuser . .
+COPY . .
 
-# Switch to non-root user
-USER appuser
+# Copy and set entrypoint
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 # Expose port
 EXPOSE 44638
 
-# Default command
+# Entrypoint runs migrations, then starts the app
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "44638"]
