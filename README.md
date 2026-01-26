@@ -42,6 +42,7 @@ AFAS-X is a comprehensive voice authentication system that embeds imperceptible 
 | **Multi-Layer Fingerprinting** | 6 independent fingerprint layers analyzing spectral, temporal, physiological, semantic, adversarial, and meta features |
 | **Blockchain Provenance** | Every fingerprint is recorded on both a local Python blockchain and Ethereum (Sepolia testnet) |
 | **User Authentication** | Secure JWT-based authentication with refresh token rotation |
+| **Google OAuth** | One-click sign in with Google, with email/password as fallback |
 | **API Key Access** | Generate scoped API keys for programmatic access |
 | **Seed Phrase Ownership** | BIP-39 24-word mnemonic proves fingerprint ownership (legal proof) |
 | **Real-time Verification** | Instantly verify if audio matches a registered fingerprint |
@@ -203,6 +204,8 @@ All fingerprint operations require authentication via **JWT token** or **API key
 |----------|--------|------|-------------|
 | `/auth/register` | POST | None | Register new user, returns seed phrase **once** |
 | `/auth/login` | POST | None | Login with email/password |
+| `/auth/google/login` | GET | None | Get Google OAuth authorization URL |
+| `/auth/google/callback` | GET | None | Handle Google OAuth callback |
 | `/auth/refresh` | POST | None | Refresh access token |
 | `/auth/logout` | POST | JWT | Revoke refresh token |
 | `/auth/me` | GET | JWT | Get current user info |
@@ -289,6 +292,10 @@ curl -X POST http://localhost:44638/verify \
 | `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh token lifetime | `30` |
 | `ED25519_PRIVATE_KEY` | Base64-encoded signing key | Auto-generated |
 | `API_PORT` | API server port | `44638` |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID | Optional |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret | Optional |
+| `GOOGLE_REDIRECT_URI` | Google OAuth callback URL | `https://afasx.my-ai.tech/auth/google/callback` |
+| `FRONTEND_URL` | Frontend application URL | `https://afasx.my-ai.tech` |
 | `ALCHEMY_RPC_URL` | Ethereum RPC endpoint | Optional |
 | `ETHEREUM_PRIVATE_KEY` | Wallet private key (hex) | Optional |
 

@@ -25,7 +25,11 @@ class User(BaseModel):
         nullable=False,
         index=True,
     )
-    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    password_hash: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Null for OAuth-only users",
+    )
     seed_phrase_hash: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
@@ -33,6 +37,24 @@ class User(BaseModel):
     )
     display_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # OAuth provider info
+    oauth_provider: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+        comment="OAuth provider: 'google', 'github', etc. Null for email/password users",
+    )
+    oauth_provider_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+        comment="User ID from OAuth provider",
+    )
+    avatar_url: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="Profile picture URL from OAuth provider",
+    )
 
     # Relationships
     api_keys: Mapped[list["APIKey"]] = relationship(

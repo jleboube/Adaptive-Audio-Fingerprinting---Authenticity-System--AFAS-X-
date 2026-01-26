@@ -113,6 +113,8 @@ class UserResponse(BaseModel):
     id: UUID
     email: str
     display_name: str | None
+    avatar_url: str | None = None
+    oauth_provider: str | None = None
     is_active: bool
     created_at: datetime
 
@@ -196,3 +198,31 @@ class VerifyOwnershipResponse(BaseModel):
     record_id: UUID | None = None
     owner_email: str | None = None
     created_at: datetime | None = None
+
+
+# =============================================================================
+# Google OAuth
+# =============================================================================
+
+
+class GoogleOAuthResponse(BaseModel):
+    """Response schema for Google OAuth login/register."""
+
+    user_id: UUID
+    email: str
+    display_name: str | None
+    avatar_url: str | None
+    is_new_user: bool
+    seed_phrase: str | None = Field(
+        None,
+        description="Only returned for new users - SAVE THIS! It will NEVER be shown again.",
+    )
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+
+
+class GoogleAuthUrlResponse(BaseModel):
+    """Response schema for Google OAuth authorization URL."""
+
+    auth_url: str

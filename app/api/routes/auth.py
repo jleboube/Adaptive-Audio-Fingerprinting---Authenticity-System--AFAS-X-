@@ -3,12 +3,16 @@
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
+import httpx
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from authlib.integrations.starlette_client import OAuth
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies.auth import get_current_user
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import (
     create_access_token,
@@ -30,6 +34,8 @@ from app.schemas.auth import (
     APIKeyCreateResponse,
     APIKeyListItem,
     APIKeyListResponse,
+    GoogleAuthUrlResponse,
+    GoogleOAuthResponse,
     LoginRequest,
     LoginResponse,
     RegisterRequest,
@@ -130,8 +136,23 @@ async def login(
     result = await db.execute(select(User).where(func.lower(User.email) == func.lower(request.email)))
     user = result.scalar_one_or_none()
 
-    if user is None or not verify_password(request.password, user.password_hash):
-        logger.warning("Login failed: invalid credentials", email=request.email)
+    if user is None:
+        logger.warning("Login failed: user not found", email=request.email)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+
+    # Check if user has a password (OAuth-only users don't)
+    if user.password_hash is None:
+        logger.warning("Login failed: OAuth-only user", email=request.email)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This account uses Google Sign-In. Please use 'Continue with Google' to login.",
+        )
+
+    if not verify_password(request.password, user.password_hash):
+        logger.warning("Login failed: invalid password", email=request.email)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
@@ -284,6 +305,8 @@ async def get_me(
         id=current_user.id,
         email=current_user.email,
         display_name=current_user.display_name,
+        avatar_url=current_user.avatar_url,
+        oauth_provider=current_user.oauth_provider,
         is_active=current_user.is_active,
         created_at=current_user.created_at,
     )
@@ -306,6 +329,8 @@ async def update_me(
         id=current_user.id,
         email=current_user.email,
         display_name=current_user.display_name,
+        avatar_url=current_user.avatar_url,
+        oauth_provider=current_user.oauth_provider,
         is_active=current_user.is_active,
         created_at=current_user.created_at,
     )
@@ -492,3 +517,203 @@ async def verify_ownership(
             message="Seed phrase does not match the owner of this fingerprint",
             record_id=audio_record.id,
         )
+
+
+# =============================================================================
+# Google OAuth
+# =============================================================================
+
+GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
+
+
+@router.get("/google/login", response_model=GoogleAuthUrlResponse)
+async def google_login() -> GoogleAuthUrlResponse:
+    """Get Google OAuth authorization URL.
+
+    Redirect the user to this URL to initiate Google sign-in.
+    """
+    settings = get_settings()
+
+    if not settings.google_oauth_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google OAuth is not configured",
+        )
+
+    # Build Google OAuth authorization URL
+    auth_url = (
+        "https://accounts.google.com/o/oauth2/v2/auth?"
+        f"client_id={settings.google_client_id}&"
+        f"redirect_uri={settings.google_redirect_uri}&"
+        "response_type=code&"
+        "scope=openid%20email%20profile&"
+        "access_type=offline&"
+        "prompt=consent"
+    )
+
+    logger.info("Google OAuth login initiated")
+    return GoogleAuthUrlResponse(auth_url=auth_url)
+
+
+@router.get("/google/callback", response_model=GoogleOAuthResponse)
+async def google_callback(
+    code: str = Query(..., description="Authorization code from Google"),
+    db: AsyncSession = Depends(get_db),
+) -> GoogleOAuthResponse:
+    """Handle Google OAuth callback.
+
+    Exchange the authorization code for tokens and create/login user.
+    """
+    settings = get_settings()
+
+    if not settings.google_oauth_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google OAuth is not configured",
+        )
+
+    logger.info("Google OAuth callback received")
+
+    try:
+        # Exchange code for tokens
+        async with httpx.AsyncClient() as client:
+            token_response = await client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "client_id": settings.google_client_id,
+                    "client_secret": settings.google_client_secret,
+                    "code": code,
+                    "grant_type": "authorization_code",
+                    "redirect_uri": settings.google_redirect_uri,
+                },
+            )
+
+            if token_response.status_code != 200:
+                logger.error("Google token exchange failed", status=token_response.status_code)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Failed to exchange authorization code",
+                )
+
+            tokens = token_response.json()
+            google_access_token = tokens.get("access_token")
+
+            # Get user info from Google
+            userinfo_response = await client.get(
+                "https://www.googleapis.com/oauth2/v2/userinfo",
+                headers={"Authorization": f"Bearer {google_access_token}"},
+            )
+
+            if userinfo_response.status_code != 200:
+                logger.error("Failed to get Google user info")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Failed to get user info from Google",
+                )
+
+            google_user = userinfo_response.json()
+
+    except httpx.HTTPError as e:
+        logger.error("Google OAuth HTTP error", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to communicate with Google",
+        )
+
+    google_id = google_user.get("id")
+    email = google_user.get("email")
+    name = google_user.get("name")
+    picture = google_user.get("picture")
+
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email not provided by Google",
+        )
+
+    logger.info("Google user info retrieved", email=email, google_id=google_id)
+
+    # Check if user exists by Google ID
+    result = await db.execute(
+        select(User).where(
+            User.oauth_provider == "google",
+            User.oauth_provider_id == google_id,
+        )
+    )
+    user = result.scalar_one_or_none()
+
+    is_new_user = False
+    seed_phrase = None
+
+    if user is None:
+        # Check if user exists with same email (registered via email/password)
+        result = await db.execute(
+            select(User).where(func.lower(User.email) == func.lower(email))
+        )
+        existing_user = result.scalar_one_or_none()
+
+        if existing_user:
+            # Link Google account to existing user
+            existing_user.oauth_provider = "google"
+            existing_user.oauth_provider_id = google_id
+            existing_user.avatar_url = picture
+            if not existing_user.display_name and name:
+                existing_user.display_name = name
+            user = existing_user
+            logger.info("Linked Google account to existing user", user_id=str(user.id))
+        else:
+            # Create new user
+            is_new_user = True
+            seed_phrase = generate_seed_phrase()
+            seed_hash = hash_seed_phrase(seed_phrase)
+
+            user = User(
+                email=email.lower(),
+                password_hash=None,  # OAuth users don't have password
+                seed_phrase_hash=seed_hash,
+                display_name=name,
+                is_active=True,
+                oauth_provider="google",
+                oauth_provider_id=google_id,
+                avatar_url=picture,
+            )
+            db.add(user)
+            await db.flush()
+            logger.info("Created new user via Google OAuth", user_id=str(user.id), email=email)
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is deactivated",
+        )
+
+    # Update avatar URL if changed
+    if user.avatar_url != picture:
+        user.avatar_url = picture
+
+    # Create JWT tokens
+    access_token = create_access_token(str(user.id), user.email)
+    refresh_token, refresh_expires = create_refresh_token(str(user.id))
+
+    # Store refresh token hash
+    refresh_record = RefreshToken(
+        user_id=user.id,
+        token_hash=hash_seed_phrase(refresh_token),
+        expires_at=refresh_expires,
+    )
+    db.add(refresh_record)
+
+    await db.commit()
+
+    logger.info("Google OAuth login successful", user_id=str(user.id), is_new_user=is_new_user)
+
+    return GoogleOAuthResponse(
+        user_id=user.id,
+        email=user.email,
+        display_name=user.display_name,
+        avatar_url=user.avatar_url,
+        is_new_user=is_new_user,
+        seed_phrase=seed_phrase,  # Only set for new users
+        access_token=access_token,
+        refresh_token=refresh_token,
+    )

@@ -53,10 +53,21 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 30
 
+    # Google OAuth
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    google_redirect_uri: str = "https://afasx.my-ai.tech/auth/google/callback"
+    frontend_url: str = "https://afasx.my-ai.tech"
+
     @property
     def jwt_secret(self) -> str:
         """Get JWT secret key, falling back to main secret key."""
         return self.jwt_secret_key or self.secret_key
+
+    @property
+    def google_oauth_enabled(self) -> bool:
+        """Check if Google OAuth is configured."""
+        return bool(self.google_client_id and self.google_client_secret)
 
 
 @lru_cache
