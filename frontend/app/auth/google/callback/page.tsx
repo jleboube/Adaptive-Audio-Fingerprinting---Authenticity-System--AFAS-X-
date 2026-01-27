@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -27,11 +27,17 @@ export default function GoogleCallbackPage() {
   const [seedCopied, setSeedCopied] = useState(false);
   const [seedAcknowledged, setSeedAcknowledged] = useState(false);
 
+  // Prevent duplicate API calls (React Strict Mode calls useEffect twice)
+  const hasCalledRef = useRef(false);
+
   const { handleGoogleCallback } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
 
   useEffect(() => {
+    // Prevent duplicate calls
+    if (hasCalledRef.current) return;
+
     const code = searchParams.get("code");
     const errorParam = searchParams.get("error");
 
@@ -46,6 +52,9 @@ export default function GoogleCallbackPage() {
       setIsLoading(false);
       return;
     }
+
+    // Mark as called to prevent duplicate API requests
+    hasCalledRef.current = true;
 
     // Exchange code for tokens
     handleGoogleCallback(code)

@@ -4,7 +4,9 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies.auth import get_authenticated_user
@@ -148,10 +150,45 @@ async def create_fingerprint(
             created_at=datetime.now(timezone.utc),
         )
 
+    except IntegrityError as e:
+        await db.rollback()
+        # Check if it's a duplicate audio hash
+        if "audio_records_original_hash_key" in str(e) or "original_hash" in str(e):
+            logger.warning(
+                "Duplicate fingerprint attempt",
+                original_hash=result.original_hash if 'result' in dir() else "unknown",
+                user_id=str(current_user.id),
+            )
+            # Find the existing record
+            existing = await db.execute(
+                select(AudioRecord).where(
+                    AudioRecord.original_hash == result.original_hash
+                )
+            )
+            existing_record = existing.scalar_one_or_none()
+
+            detail = "This audio file has already been fingerprinted."
+            if existing_record:
+                detail += f" Record ID: {existing_record.id}"
+                if existing_record.user_id == current_user.id:
+                    detail += " (owned by you)"
+                else:
+                    detail += " (owned by another user)"
+
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=detail,
+            )
+        else:
+            logger.error("Database integrity error", error=str(e))
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database error occurred",
+            )
     except Exception as e:
         logger.error("Fingerprint creation failed", error=str(e))
         await db.rollback()
         raise HTTPException(
-            status_code=500,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create fingerprint: {str(e)}",
         )
