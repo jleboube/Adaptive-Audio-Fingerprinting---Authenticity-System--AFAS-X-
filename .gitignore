@@ -91,3 +91,6 @@ yarn-error.log*
 
 # Claude project files
 .claude/
+# Files blocked by secret scanner - DO NOT REMOVE
+README.md
+frontend/lib/auth-context.tsx
